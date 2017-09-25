@@ -1,0 +1,182 @@
+#!/bin/sh
+
+# Brice Maltby 09/22/17, 3:57pm CDT
+# Listen for new articles, scrape the text.
+
+
+import select
+import pickle
+import psycopg2
+import psycopg2.extensions
+from threading import Thread
+from newspaper import Article
+
+newarticles = []
+
+conn = psycopg2.connect(dsn="host=localhost port=5432 dbname=sample_db connect_timeout=10")
+conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+
+cur = conn.cursor()
+cur.execute("LISTEN newarticles;")
+
+def runA():
+    while True:
+        if select.select([conn],[],[],5) == ([],[],[]):
+            print("Timeout")
+        else:
+            conn.poll()
+            while conn.notifies:
+                notify = conn.notifies.pop(0)
+                newarticles.append(notify.payload)
+
+def runB():
+    while True:
+        if newarticles != []:
+            for item in newarticles:
+                articleObject = Article(item)
+                articleObject.download()
+                articleObject.parse()
+                print(articleObject.publish_date)
+                print(articleObject.text)
+
+                articleObject.nlp()
+                print(articleObject.keywords)
+
+                cur.execute("UPDATE newarticles SET bodytext = '{0}' WHERE url = '{1}';".format(articleObject.text, item))
+                conn.commit()
+                newarticles.remove(item)
+
+
+if __name__ == "__main__":
+    t1 = Thread(target = runA)
+    t2 = Thread(target = runB)
+    t1.setDaemon(True)
+    t2.setDaemon(True)
+    t1.start()
+    t2.start()
+    while True:
+        pass
+
+
+
+
+
+
+#
+# import select
+# # import urllib
+# import psycopg2
+# # import urllib.request
+# import psycopg2.extensions
+# from threading import Thread
+# from newspaper import Article
+# # from bs4 import BeautifulSoup
+# # from urllib.request import urlopen
+# # from mercury_parser import ParserAPI
+#
+#
+# mercury = ParserAPI(api_key='9v0VGBgeJDgy8G3eDeV8tgLqD58HfsCOINsAfEI2')
+# newarticles = []
+#
+# conn = psycopg2.connect(dsn="host=localhost port=5432 dbname=sample_db connect_timeout=10")
+# conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+#
+# curs = conn.cursor()
+# curs.execute("LISTEN newarticles;")
+#
+# def runA():
+#     while True:
+#         if select.select([conn],[],[],5) == ([],[],[]):
+#             print("Timeout")
+#         else:
+#             conn.poll()
+#             while conn.notifies:
+#                 notify = conn.notifies.pop(0)
+#                 newarticles.append(notify.payload)
+#
+# def runB():
+#     while True:
+#         if newarticles != []:
+#             print('True')
+#             for article in newarticles:
+#                 html = urlopen(article)
+#                 soup = BeautifulSoup(html.read())
+#                 txt = soup.body.getText()
+#                 print(txt)
+#
+#
+#
+#                 # print('parsing')
+#                 # parsedArticle = mercury.parse(article)
+#                 # parsedArticleContent = str(parsedArticle.content)
+#                 # print('parsedArticleContent')
+#                 # print(parsedArticleContent)
+#
+#
+#
+#                 # print(html2text(parsedArticleContent))
+#
+#                 # soup = BeautifulSoup(parsedArticleContent, 'html.parser')
+#                 # print(soup.prettify())
+#
+#                 # print(soup.get_text())
+#
+#                 # print("parsedArticle.title")
+#                 # print(parsedArticle.title)
+#                 # print("parsedArticle.content")
+#                 # print(parsedArticle.content)
+#                 newarticles.remove(article)
+#
+# import urllib
+#
+# def html2text(strText):
+#     str1 = strText
+#     int2 = str1.lower().find("<body")
+#     if int2>0:
+#        str1 = str1[int2:]
+#     int2 = str1.lower().find("</body>")
+#     if int2>0:
+#        str1 = str1[:int2]
+#     list1 = ['<br>',  '<tr',  '<td', '</p>', 'span>', 'li>', '</h', 'div>' ]
+#     list2 = [chr(13), chr(13), chr(9), chr(13), chr(13),  chr(13), chr(13), chr(13)]
+#     bolFlag1 = True
+#     bolFlag2 = True
+#     strReturn = ""
+#     for int1 in range(len(str1)):
+#       str2 = str1[int1]
+#       for int2 in range(len(list1)):
+#         if str1[int1:int1+len(list1[int2])].lower() == list1[int2]:
+#            strReturn = strReturn + list2[int2]
+#       if str1[int1:int1+7].lower() == '<script' or str1[int1:int1+9].lower() == '<noscript':
+#          bolFlag1 = False
+#       if str1[int1:int1+6].lower() == '<style':
+#          bolFlag1 = False
+#       if str1[int1:int1+7].lower() == '</style':
+#          bolFlag1 = True
+#       if str1[int1:int1+9].lower() == '</script>' or str1[int1:int1+11].lower() == '</noscript>':
+#          bolFlag1 = True
+#       if str2 == '<':
+#          bolFlag2 = False
+#       if bolFlag1 and bolFlag2 and (ord(str2) != 10) :
+#         strReturn = strReturn + str2
+#       if str2 == '>':
+#          bolFlag2 = True
+#       if bolFlag1 and bolFlag2:
+#         strReturn = strReturn.replace(chr(32)+chr(13), chr(13))
+#         strReturn = strReturn.replace(chr(9)+chr(13), chr(13))
+#         strReturn = strReturn.replace(chr(13)+chr(32), chr(13))
+#         strReturn = strReturn.replace(chr(13)+chr(9), chr(13))
+#         strReturn = strReturn.replace(chr(13)+chr(13), chr(13))
+#     strReturn = strReturn.replace(chr(13), '\n')
+#     return strReturn
+#
+# if __name__ == "__main__":
+#     t1 = Thread(target = runA)
+#     t2 = Thread(target = runB)
+#     t1.setDaemon(True)
+#     t2.setDaemon(True)
+#     t1.start()
+#     t2.start()
+#     while True:
+#         pass
+#

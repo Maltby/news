@@ -1,0 +1,109 @@
+#!/bin/sh
+
+# Brice Maltby 09/20/17, 2:16am CDT
+# Pull new article(s) from a single feed, then push article(s) to RDBS
+# Based on "https://github.com/jkrauska/aws-scripts/blob/master/aws-rss.py"
+
+try:
+    import feedparser
+    import datetime
+    import textwrap
+    import psycopg2
+    import syslog
+    import sys
+except:
+    # Most common install issue
+    print('ERROR: You need to install the python feedparser library and psycopg2.')
+    sys.exit(2)
+
+# Set up db connection
+print('attemtping to connect')
+conn = psycopg2.connect(dsn="host=localhost port=5432 dbname=sample_db connect_timeout=10")
+cur = conn.cursor()
+print('connected')
+
+rssFeeds = {'http://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml':'The New York Times','http://feeds.reuters.com/reuters/topNews':'Reuters','http://www.aljazeera.com/xml/rss/all.xml':'Al Jazeera'}
+
+for url, newsSource in rssFeeds.items():
+    # Parse urls
+    freshdata = feedparser.parse(url)
+
+    cur.execute("SELECT source, url, datetime FROM articles WHERE source = '%s' ORDER BY datetime DESC LIMIT 1" % newsSource)
+    mostRecentlyFed = cur.fetchone()
+    if mostRecentlyFed != None:
+
+        lastestDatetimeFed = mostRecentlyFed[2]
+
+        for article in freshdata.entries:
+            # Usable datetime
+            publishedDateTime = str(article.published_parsed)
+            publishedDateTime = publishedDateTime.translate({ord(c): None for c in 'abcdefghijklmnopqrstuvwxyz_=. '})
+            # print('publishedDateTime')
+            # print(publishedDateTime)
+
+            if publishedDateTime > lastestDatetimeFed:
+                print('New Article: %s' % article.title)
+                # Save new article
+                cur.execute("INSERT INTO articles (url, source, datetime, title) VALUES (%s, %s, %s, %s)", (article.link, newsSource, publishedDateTime, article.title))
+                cur.execute("NOTIFY newarticles, '%s';" % article.link)
+
+    else:
+        for article in freshdata.entries:
+            # Usable datetime
+            publishedDateTime = str(article.published_parsed)
+            publishedDateTime = publishedDateTime.translate({ord(c): None for c in 'abcdefghijklmnopqrstuvwxyz_=. '})
+
+            print('New Article: %s' % article.title)
+            # Save new article
+            cur.execute("INSERT INTO articles (url, source, datetime, title) VALUES (%s, %s, %s, %s)", (article.link, newsSource, publishedDateTime, article.title))
+            cur.execute("NOTIFY newarticles, '%s';" % article.link)
+
+conn.commit()
+cur.close()
+conn.close()
+print("Feeder complete")
+
+
+# try:
+#     import feedparser
+#     import textwrap
+#     import psycopg2
+#     import syslog
+#     import sys
+# except:
+#     # Most common install issue
+#     print('ERROR: You need to install the python feedparser library and psycopg2.')
+#     sys.exit(2)
+#
+# # Set up db connection
+# print('attemtping to connect')
+# conn = psycopg2.connect(dsn="host=localhost port=5432 dbname=sample_db connect_timeout=10")
+# cur = conn.cursor()
+# print('connected')
+#
+# # rssFeeds = {'http://feeds.washingtonpost.com/rss/national':'The Washington Post','http://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml':'The New York Times','http://feeds.reuters.com/reuters/topNews':'Reuters'}
+# rssFeeds = {'http://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml':'The New York Times','http://feeds.reuters.com/reuters/topNews':'Reuters','http://www.aljazeera.com/xml/rss/all.xml':'Al Jazeera'}
+#
+# # print(rssFeeds)
+#
+# for url, newsSource in rssFeeds.items():
+#     # Parse urls
+#     freshdata = feedparser.parse(url)
+#     print('newsSource: %s' % newsSource)
+#
+#     cur.execute("SELECT source, url, datetime FROM articles WHERE source = '%s' ORDER BY datetime DESC LIMIT 1" % newsSource)
+#     mostRecentlyFed = cur.fetchone()
+#
+#     mostRecentlyFedURL = mostRecentlyFed[1]
+#     print(mostRecentlyFedURL)
+#
+#     for article in freshdata.entries:
+#         # Usable datetime
+#         parsedDate = article.published_parsed
+#         # Save new article
+#         cur.execute("INSERT INTO articles (url, source, datetime, title) VALUES (%s, %s, %s, %s)", (article.link, newsSource, parsedDate, article.title))
+#
+# conn.commit()
+# cur.close()
+# conn.close()
+# print("Feeder complete")
